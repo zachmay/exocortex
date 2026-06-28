@@ -1,0 +1,9 @@
+{
+  "//": "Which plugins the bridge loads. A loaded plugin's scopes become grantable; disabling one instantly stops serving its tools (even to existing tokens). Per-plugin value may be `true` or `{ \"enabled\": true, ... }` for future settings. Plugins must exist in src/plugins/registry.ts.",
+  "plugins": {
+    "gh": true,
+    "acli": true,
+    "calendar": true,
+    "whisper": false
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "plugins": {
+    "gh": true,
+    "acli": true,
+    "calendar": true,
+    "whisper": true
+  }
+}

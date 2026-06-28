@@ -1,6 +1,11 @@
 {
   "name": "exocortex-support",
   "private": true,
+  "scripts": {
+    "sandbox:start": "bash sandbox/start.sh",
+    "sandbox:build": "bash sandbox/build.sh",
+    "bridge:start": "bash host-bridge/run.sh"
+  },
   "dependencies": {
     "@playwright/mcp": "0.0.76"
   }

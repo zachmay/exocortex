@@ -1,2 +1,6 @@
 vault/
 node_modules/
+
+# Host bridge — secrets and machine-local state
+host-bridge/.bridge-token
+host-bridge/.env

@@ -1,0 +1,233 @@
+schemaVersion: "1"
+kind: agent
+name: obsidian
+agent:
+  image: exocortex-sbx:latest
+  aiFilename: CLAUDE.md
+  entrypoint:
+    run: [runuser, -u, agent, --, claude, --dangerously-skip-permissions]
+commands:
+  install:
+    - command: ln -sfn "$WORKSPACE_DIR" /vault
+    - command: mkdir -p /scratch && chown agent:agent /scratch
+    - command: mkdir -p /home/agent/.claude && cp -a /vault/System/Agent/Sandbox/kit/files/home/claude/. /home/agent/.claude/ && chown -R agent:agent /home/agent/.claude
+    # Register the consolidated host-bridge MCP at user scope so every fresh
+    # sandbox sees it. One server (exocortex-host-bridge, port 8765) serves all
+    # host capabilities as plugins (gh, acli, calendar, whisper). It authenticates
+    # with a stateless signed token read from the gitignored .bridge-token handoff
+    # file (vault-mounted at /vault); the host bridge writes that file on start.
+    # An absent/empty token registers fine but yields a clean 401 until the host
+    # bridge has run once and the sandbox is recreated — so start the host bridge
+    # first. Keyed on host.docker.internal:8765, matching the localhost:8765 allow
+    # rule below.
+    - command: >-
+        runuser -u agent -- bash -c 'TOKEN=$(cat /vault/System/Agent/host-bridge/.bridge-token 2>/dev/null); claude mcp add --scope user --transport http host-bridge http://host.docker.internal:8765/mcp --header "Authorization: Bearer ${TOKEN}"'
+caps:
+  network:
+    # Deps are baked into the image — no registry access needed at runtime.
+    # This sandbox runs Claude Code remote-controlled from claude.ai. Network
+    # is locked down to anthropic/claude domains, the host bridges, and a
+    # curated read-only safelist of reputable skill data sources (added below).
+    # Everything else that sbx's global default-* policies open is explicitly
+    # denied further down.
+    allow:
+      - claude.ai
+      - "**.claude.ai"
+      - claude.com
+      - api.anthropic.com
+      - platform.claude.com
+      - statsig.anthropic.com
+      # Host bridge. KEY FINDING: sbx's egress proxy classifies the resolved host
+      # address as `localhost`, so allow rules MUST be keyed on `localhost:<port>` —
+      # a bare `host.docker.internal` entry is a silent no-op. Bare `localhost`
+      # works but opens ALL host ports; scope per-port for least privilege.
+      #
+      # exocortex-host-bridge (System/Agent/host-bridge): one host-native MCP server
+      # serving all host capabilities as plugins — gh + acli (the host's
+      # authenticated CLIs), calendar (icalBuddy/EventKit), whisper (mlx_whisper).
+      # Native macOS process, NOT a container: EventKit, Metal, and the host CLI
+      # auth only exist on the host. Replaces the former per-capability bridges on
+      # 8010/8020/8099.
+      - localhost:8765
+      # --- Curated read-only skill data sources -------------------------------
+      # Derived from a per-skill network audit (2026-06-12): every entry here is
+      # a reputable, READ-ONLY API/site that a vault skill fetches from. No
+      # write/POST endpoints, no arbitrary-crawl, no exfil sinks. Skills needing
+      # open-web crawl (capture-article, web-reading-ingestion, recipe-librarian,
+      # open WebSearch research) and the one write-capable service (self-hosted
+      # Lidarr) are deliberately handled in out-of-sandbox sessions instead.
+      # `**.` matches subdomains only; apex hosts are listed explicitly.
+      # Reference knowledge (general lookups, People Librarian)
+      - "**.wikipedia.org"
+      - "**.wikimedia.org"
+      - wikidata.org
+      # cube-manager — Scryfall MTG card data
+      - api.scryfall.com
+      - cards.scryfall.io
+      # eurorack-manager — ModularGrid module specs
+      - "**.modulargrid.net"
+      # film-librarian — TMDB metadata + poster images
+      - api.themoviedb.org
+      - image.tmdb.org
+      - www.themoviedb.org
+      # craigslist-crawler — classifieds listings
+      - "**.craigslist.org"
+      # music metadata (music research)
+      - musicbrainz.org
+    # Deny everything else the global default-* allow policies open. Deny
+    # beats allow, so this neutralizes them for this sandbox while leaving
+    # the globals intact for other sandboxes.
+    deny:
+      # default-ai-services (non-anthropic)
+      - "**.chatgpt.com"
+      - "**.cursor.sh"
+      - "**.factory.ai"
+      - "**.oaistatic.com"
+      - "**.oaiusercontent.com"
+      - "**.openai.com"
+      - api.perplexity.ai
+      - api.workos.com
+      - cdn.openaimerge.com
+      - chatgpt.com
+      - cursor.com
+      - factory.ai
+      - gemini.google.com
+      - generativelanguage.googleapis.com
+      - models.dev
+      - play.googleapis.com
+      # default-package-managers
+      - apache.org
+      - astral.sh
+      - bootstrap.pypa.io
+      - "**.bun.sh"
+      - bun.sh
+      - cocoapods.org
+      - cpan.org
+      - crates.io
+      - dot.net
+      - dotnet.microsoft.com
+      - eclipse.org
+      - files.pythonhosted.org
+      - golang.org
+      - goproxy.io
+      - "**.gradle.org"
+      - gradle.org
+      - haskell.org
+      - hex.pm
+      - index.crates.io
+      - java.com
+      - java.net
+      - maven.org
+      - metacpan.org
+      - nodejs.org
+      - nodesource.com
+      - npm.duckdb.org
+      - npmjs.com
+      - "**.npmjs.org"
+      - nuget.org
+      - "**.packagist.org"
+      - packagist.com
+      - packagist.org
+      - pkg.go.dev
+      - proxy.golang.org
+      - pub.dev
+      - pypa.io
+      - pypi.org
+      - pypi.python.org
+      - pythonhosted.org
+      - registry.npmjs.org
+      - repo.maven.apache.org
+      - ruby-lang.org
+      - rubygems.org
+      - rubyonrails.org
+      - rustup.rs
+      - rvm.io
+      - sh.rustup.rs
+      - spring.io
+      - static.crates.io
+      - static.rust-lang.org
+      - sum.golang.org
+      - swift.org
+      - tuf-repo-cdn.sigstore.dev
+      - "**.yarnpkg.com"
+      - yarnpkg.com
+      - ziglang.org
+      # default-code-and-containers
+      - bitbucket.org
+      - "**.data.mcr.microsoft.com"
+      - dhi.io
+      - docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com
+      - "**.docker.com"
+      - docker.com
+      - "**.docker.io"
+      - docker.io
+      - "**.gcr.io"
+      - gcr.io
+      - ghcr.io
+      - "**.github.com"
+      - github.com
+      - "**.githubcopilot.com"
+      - "**.githubusercontent.com"
+      - "**.gitlab.com"
+      - gitlab.com
+      - k8s.io
+      - launchpad.net
+      - mcr.microsoft.com
+      - ppa.launchpad.net
+      - "**.production.cloudflare.docker.com"
+      - production.cloudflare.docker.com
+      - "**.production.cloudfront.docker.com"
+      - production.cloudfront.docker.com
+      - public.ecr.aws
+      - quay.io
+      - registry.k8s.io
+      - sourceforge.net
+      # default-cloud-infrastructure
+      - "**.amazonaws.com"
+      - apis.google.com
+      - app.daytona.io
+      - azure.com
+      - binaries.prisma.sh
+      - challenges.cloudflare.com
+      - clerk.com
+      - csp.withgoogle.com
+      - dev.azure.com
+      - dl.google.com
+      - fastly.com
+      - figma.com
+      - "**.googleapis.com"
+      - "**.googleusercontent.com"
+      - "**.gstatic.com"
+      - "**.gvt1.com"
+      - "**.hashicorp.com"
+      - hashicorp.com
+      - jsdelivr.net
+      - json-schema.org
+      - json.schemastore.org
+      - login.microsoftonline.com
+      - mise-versions.jdx.dev
+      - mise.run
+      - packages.microsoft.com
+      - play.google.com
+      - playwright.azureedge.net
+      - "**.public.blob.vercel-storage.com"
+      - supabase.com
+      - unpkg.com
+      - vercel.com
+      - "**.visualstudio.com"
+      - visualstudio.com
+      - www.google.com
+      # default-os-packages
+      - alpinelinux.org
+      - apt.llvm.org
+      - archive.ubuntu.com
+      - archlinux.org
+      - centos.org
+      - "**.debian.org"
+      - debian.org
+      - dl-cdn.alpinelinux.org
+      - fedoraproject.org
+      - packagecloud.io
+      - ports.ubuntu.com
+      - security.ubuntu.com
+      - ubuntu.com

@@ -1,0 +1,38 @@
+# Python dependencies baked into the sandbox image.
+# See packages.md for the rationale on each entry.
+
+# Vault-as-database
+polars
+ruamel.yaml
+
+# Web ingestion
+httpx
+trafilatura
+recipe-scrapers
+beautifulsoup4
+lxml
+playwright
+
+# Studio / MIDI
+mido
+
+# Documentation / PDFs
+pypdf
+
+# Images
+Pillow
+pillow-heif
+
+# Dates
+pendulum
+
+# Diffs
+deepdiff
+
+# Dev toolchain — lint, format, type-check, test (baked in; runtime is network-locked).
+# Type-checking: mypy here; pyright is a Node tool (in package.json) so it bundles
+# offline. Lint+format: ruff (single fast tool). Test: pytest + coverage.
+ruff
+mypy
+pytest
+pytest-cov

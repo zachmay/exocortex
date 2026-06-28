@@ -1,0 +1,218 @@
+---
+title: "Exocortex Sandbox"
+created: 2026-05-22
+tags:
+  - agent
+  - sandbox
+  - docker
+---
+
+## What this is
+
+A Docker Sandboxes (`sbx`) setup for running Claude Code against this vault
+inside a microVM. The agent runs in skip-permissions mode; the microVM
+boundary is the safety net.
+
+See [[Docker SBX]] for background on `sbx` itself.
+
+## Files in this directory
+
+| File | Role |
+|---|---|
+| `Dockerfile` | Image recipe — extends `docker/sandbox-templates:claude-code`, installs npm + Python deps + a real Chromium |
+| `package.json` / `package-lock.json` | npm manifest (`package-lock.json` is the deterministic lock) |
+| `requirements.txt` | Python deps — human-edited list with loose pins |
+| `requirements.lock.txt` | Pip-frozen lockfile (full transitive closure) — the file the Dockerfile actually installs |
+| `kit/spec.yaml` | sbx kit — names the agent (`obsidian`), references the image, sets `/vault` symlink and `/scratch`, declares network policy |
+| `kit/files/home/claude/` | Copied to `/home/agent/.claude/` at sandbox creation (sandbox-only `CLAUDE.md` overlay + `settings.json`). Source dir is dotless so Obsidian sync picks it up; an install step in `spec.yaml` does the `cp` + `chown`. |
+| `run.sh` | Launcher — runs `sbx run obsidian --kit ...` |
+| `README.md` | This file |
+| `packages.md` | Per-package rationale for what's included / skipped |
+
+Everything `docker build` needs is in this directory. Build context is
+`System/Agent/Sandbox/`.
+
+## First-time setup on a fresh Mac
+
+Apple Silicon, macOS Sonoma (14) or later. Roughly 10 minutes end-to-end,
+most of which is the image build.
+
+1. **Install Docker.** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+   or any Docker daemon. Verify: `docker --version`.
+2. **Install sbx.**
+   ```console
+   $ brew install docker/tap/sbx
+   $ sbx login                       # interactive — browser OAuth + network policy picker
+   ```
+3. **Clone the vault** somewhere with read/write access. The vault path is
+   bind-mounted into the sandbox — pick a directory you trust.
+4. **Build the image** from the vault root:
+   ```console
+   $ docker build -t exocortex-sbx:latest System/Agent/Sandbox
+   ```
+   Pulls the Claude Code base (~1 GB), installs apt deps, runs `npm ci`,
+   creates a Python venv from `requirements.lock.txt`, and downloads
+   Chromium via `playwright install`. Roughly 5–8 minutes on a clean cache.
+5. **Load the image into sbx** (sbx runs its own container runtime; host
+   Docker images aren't visible to it directly):
+   ```console
+   $ docker save exocortex-sbx:latest -o /tmp/exocortex-sbx.tar
+   $ sbx template load /tmp/exocortex-sbx.tar
+   $ rm /tmp/exocortex-sbx.tar
+   ```
+6. **Validate the kit:**
+   ```console
+   $ sbx kit validate System/Agent/Sandbox/kit
+   ```
+   Expect `VALID:`.
+7. **Launch:**
+   ```console
+   $ ./System/Agent/Sandbox/run.sh
+   ```
+
+You should drop into a `claude` session inside the sandbox. Workspace is
+mounted at the host's path and symlinked to `/vault`. `/scratch` is empty
+and writable. Try `pwd` and `ls /vault` to confirm.
+
+### Only-needed-if-you're-editing-deps
+
+- **Node 20** on the host — only if you'll regenerate `package-lock.json`
+  after editing `package.json`. The vault's `.nvmrc` pins Node 20. `nvm use`
+  from the vault root picks it up.
+
+## Launching
+
+```console
+$ ./System/Agent/Sandbox/run.sh
+```
+
+The workspace is direct-mounted at the host's path (also symlinked to `/vault`
+inside the sandbox). Edits appear immediately in Obsidian — no branch /
+worktree indirection.
+
+### Passing args through to Claude
+
+`run.sh` ends with `"$@"` after the `--`, so any args you pass to the script
+are forwarded to the inner `claude` CLI inside the sandbox:
+
+```console
+$ ./System/Agent/Sandbox/run.sh --continue          # resume last session
+$ ./System/Agent/Sandbox/run.sh --model opus        # pick a model
+$ ./System/Agent/Sandbox/run.sh -p "do the thing"   # one-shot prompt
+```
+
+Quoted args with spaces are preserved (`"$@"` quotes each arg individually —
+unlike `$@` or `$*`).
+
+## Dependencies
+
+All deps are baked into the image at build time and live read-only at
+`/opt/vault-deps` (npm + venv) and `/opt/playwright-browsers` (Chromium).
+The Dockerfile sets `PATH`, `NODE_PATH`, `PUPPETEER_EXECUTABLE_PATH`, and
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` so:
+
+- npm binaries on PATH: `markdownlint-cli2`, `md-to-pdf`, `mmdc`, etc.
+- Python from the venv on PATH
+- `require()` resolves via `NODE_PATH`
+- Anything browser-driving finds Chromium via the env vars
+
+### Adding a new npm package
+
+1. Edit `System/Agent/Sandbox/package.json`
+2. From `System/Agent/Sandbox/` on the host:
+   `PUPPETEER_SKIP_DOWNLOAD=true PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install`
+   (the env vars prevent host-side browser downloads)
+3. Delete the local `node_modules/` that `npm install` created
+4. Rebuild + reload the image
+5. `sbx rm --force obsidian-Exocortex`
+
+### Adding a new Python package
+
+1. Edit `System/Agent/Sandbox/requirements.txt`
+2. Rebuild the image (will fail unless lockfile matches — see step 3)
+3. Regenerate the lockfile from the rebuilt venv:
+   ```console
+   $ docker run --rm exocortex-sbx:latest /opt/vault-deps/venv/bin/pip freeze | sort \
+       > System/Agent/Sandbox/requirements.lock.txt
+   ```
+   (Alternative: temporarily change the Dockerfile to install from
+   `requirements.txt` for one build, freeze, then revert.)
+4. Rebuild + reload, `sbx rm --force`
+
+`pip install <pkg>` and `npm install <pkg>` from *inside* the sandbox will
+fail — the npm registry is denied in the kit, and `/opt/vault-deps` is
+read-only.
+
+## Network policy
+
+`sbx` keeps two layers of network policy:
+
+- **Global defaults** (set during `sbx login`, viewable with `sbx policy ls`) —
+  apply to *every* sandbox. Out of the box this includes broad allow rules
+  like `default-ai-services`, `default-package-managers`, etc.
+- **Kit policy** (this kit's `spec.yaml`) — additive on top of the globals.
+  Setting `allowedDomains: []` does NOT close the network; the globals still
+  apply. Use `deniedDomains` to override — deny beats allow.
+
+This kit currently:
+- `allowedDomains: []` — adds nothing kit-specific
+- `deniedDomains: [registry.npmjs.org, "**.npmjs.org"]` — overrides the
+  global package-manager allowlist so the agent can't `npm install` from
+  inside the sandbox
+
+Open the `sbx` TUI in another terminal (`sbx` with no args) to watch denied
+attempts. Add domains to `allowedDomains` or `deniedDomains` as needs arise.
+Candidates over time:
+
+- Specific domains for `web-reading-ingestion` / `capture-article`
+- `host.docker.internal` — if you later wire in Ableton / Lidarr MCP servers
+
+## Future: Playwright MCP
+
+Chromium is in the image and Playwright is already installed (Python). Wiring
+up Microsoft's Playwright MCP would unlock real browser automation — scraping
+JS-heavy pages, web research, browser-based testing skills. Defer until a
+skill actually needs it; first MCP wiring will be a learning step and the
+network allowlist needs to widen for whichever sites the agent browses, so
+it's worth scoping around a concrete use case.
+
+## Kit spec schema (sbx v0.29)
+
+Discovered by reverse-engineering the validator and the binary's strings.
+
+```yaml
+schemaVersion: "1"
+kind: agent
+name: <agent-name>     # becomes <agent>-<workdir> as the sandbox instance name
+agent:
+  image: <template-image>
+  aiFilename: CLAUDE.md
+  entrypoint:
+    run: [runuser, -u, agent, --, claude, --dangerously-skip-permissions]
+commands:
+  install:             # runs once at sandbox creation, as root by default
+    - command: <shell>
+  startup:             # runs every attach
+    - command: <shell>
+  initFiles:           # write files into the sandbox at known paths
+    - path: /absolute/path
+      mode: "0755"
+      content: ...     # supports ${WORKDIR} placeholder
+network:
+  allowedDomains: [ ... ]
+  deniedDomains: [ ... ]
+environment:
+  variables:
+    KEY: value
+```
+
+Gotchas:
+- `agent.image`, not `agent.template`.
+- `agent:` lives at the top level, not nested under `spec:`.
+- `kind: agent` defines a new agent type; built-ins (`claude`, `codex`, …)
+  cannot be overridden.
+- The entrypoint runs as **root** by default — claude refuses
+  `--dangerously-skip-permissions` as root, so wrap with `runuser -u agent`.
+- `commands.install` items are objects with `command:`, not raw strings. The
+  validator accepts raw strings but silently skips them.
+- Schema is marked experimental upstream; re-validate on `sbx` upgrades.

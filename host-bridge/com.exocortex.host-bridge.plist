@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent for exocortex-host-bridge.
+
+  DEFERRED — NOT the path for the calendar plugin. macOS binds calendar (EventKit)
+  TCC access to the *launching app*, not to a bare node/bash process. A
+  launchd-spawned process does NOT reliably get the grant — even as a LaunchAgent —
+  so icalBuddy/calendar will be denied here. Run the bridge by hand from a
+  TCC-granted terminal for calendar. This plist is only useful for a calendar-less
+  config (disable `calendar` in bridge.config.json); gh/acli/whisper don't need TCC.
+  If installed, it MUST be a LaunchAgent (~/Library/LaunchAgents/), not a Daemon.
+
+  Install (adjust the path if your vault lives elsewhere):
+    cp "System/Agent/host-bridge/com.exocortex.host-bridge.plist" ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.exocortex.host-bridge.plist
+    launchctl start com.exocortex.host-bridge       # RunAtLoad also starts it
+  Logs: /tmp/exocortex-host-bridge.log (+ .err.log)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.exocortex.host-bridge</string>
+
+  <!-- Login shell so node/npm resolve on PATH; run.sh sources .env and exec's npm start. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>exec "/Users/zachmay/Projects/Exocortex/Exocortex/System/Agent/host-bridge/run.sh"</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/zachmay/Projects/Exocortex/Exocortex/System/Agent/host-bridge</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/exocortex-host-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/exocortex-host-bridge.err.log</string>
+</dict>
+</plist>
