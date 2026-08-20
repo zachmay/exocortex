@@ -1,7 +1,7 @@
 schemaVersion: "1"
-kind: agent
+kind: sandbox
 name: obsidian
-agent:
+sandbox:
   image: exocortex-sbx:latest
   aiFilename: CLAUDE.md
   entrypoint:

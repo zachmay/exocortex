@@ -176,15 +176,22 @@ skill actually needs it; first MCP wiring will be a learning step and the
 network allowlist needs to widen for whichever sites the agent browses, so
 it's worth scoping around a concrete use case.
 
-## Kit spec schema (sbx v0.29)
+## Kit spec schema
 
-Discovered by reverse-engineering the validator and the binary's strings.
+**Don't trust field names below as permanent** — this schema is marked
+experimental upstream and has already changed direction more than once (see
+`NOTES.md` for the churn history: `kind`/top-level-block field names flipped
+between `agent`/`agent:` and `sandbox`/`sandbox:` across sbx versions). Run
+`sbx kit validate sandbox/kit` after any sbx upgrade; it warns on deprecated
+fields rather than silently accepting them.
+
+Current form (kit-spec v2, as of sbx 0.33.0/0.37.1, 2026-07-30):
 
 ```yaml
 schemaVersion: "1"
-kind: agent
+kind: sandbox
 name: <agent-name>     # becomes <agent>-<workdir> as the sandbox instance name
-agent:
+sandbox:
   image: <template-image>
   aiFilename: CLAUDE.md
   entrypoint:
@@ -198,21 +205,26 @@ commands:
     - path: /absolute/path
       mode: "0755"
       content: ...     # supports ${WORKDIR} placeholder
-network:
-  allowedDomains: [ ... ]
-  deniedDomains: [ ... ]
+caps:
+  network:
+    allow: [ ... ]
+    deny: [ ... ]
 environment:
   variables:
     KEY: value
 ```
 
 Gotchas:
-- `agent.image`, not `agent.template`.
-- `agent:` lives at the top level, not nested under `spec:`.
-- `kind: agent` defines a new agent type; built-ins (`claude`, `codex`, …)
+- `sandbox.image`, not `sandbox.template`.
+- `sandbox:` lives at the top level, not nested under `spec:`.
+- `kind: sandbox` defines a new agent type; built-ins (`claude`, `codex`, …)
   cannot be overridden.
 - The entrypoint runs as **root** by default — claude refuses
   `--dangerously-skip-permissions` as root, so wrap with `runuser -u agent`.
 - `commands.install` items are objects with `command:`, not raw strings. The
   validator accepts raw strings but silently skips them.
+- `runuser` does **not** preserve the environment by default — secrets/env
+  vars set for the root install context (e.g. by `sbx secret set-custom`)
+  need explicit re-forwarding, e.g. `runuser -u agent -- env KEY="$KEY" ...`,
+  not just inherited.
 - Schema is marked experimental upstream; re-validate on `sbx` upgrades.
