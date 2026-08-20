@@ -10,18 +10,28 @@ commands:
   install:
     - command: ln -sfn "$WORKSPACE_DIR" /vault
     - command: mkdir -p /scratch && chown agent:agent /scratch
-    - command: mkdir -p /home/agent/.claude && cp -a /vault/System/Agent/Sandbox/kit/files/home/claude/. /home/agent/.claude/ && chown -R agent:agent /home/agent/.claude
+    # CLAUDE.md/settings.json/TOOLCHAIN.md are baked into the image at build
+    # time (see sandbox/Dockerfile) rather than copied here — they're
+    # per-image, not per-sandbox-instance, state.
     # Register the consolidated host-bridge MCP at user scope so every fresh
     # sandbox sees it. One server (exocortex-host-bridge, port 8765) serves all
-    # host capabilities as plugins (gh, acli, calendar, whisper). It authenticates
-    # with a stateless signed token read from the gitignored .bridge-token handoff
-    # file (vault-mounted at /vault); the host bridge writes that file on start.
-    # An absent/empty token registers fine but yields a clean 401 until the host
-    # bridge has run once and the sandbox is recreated — so start the host bridge
-    # first. Keyed on host.docker.internal:8765, matching the localhost:8765 allow
+    # host capabilities as plugins (gh, acli, calendar, whisper). Auth uses a
+    # stateless signed token, injected via sbx's custom-secret mechanism
+    # (host-bridge/run.sh registers it with `sbx secret set-custom`): the
+    # sandbox only ever sees the HOST_BRIDGE_TOKEN env var's placeholder value;
+    # sbx's egress proxy swaps in the real token in-flight on outbound requests
+    # to localhost, so the real token never enters the sandbox filesystem or
+    # config. An absent secret registration means the placeholder itself gets
+    # sent, which the host-bridge rejects with a clean 401 — run host-bridge's
+    # run.sh (which mints + registers the token) before creating the sandbox.
+    # Keyed on host.docker.internal:8765, matching the localhost:8765 allow
     # rule below.
+    # HOST_BRIDGE_TOKEN is read here (root context, where sbx injects secret
+    # env vars) and re-forwarded explicitly via `env` — runuser doesn't
+    # preserve the environment by default, so this can't just rely on
+    # inheritance.
     - command: >-
-        runuser -u agent -- bash -c 'TOKEN=$(cat /vault/System/Agent/host-bridge/.bridge-token 2>/dev/null); claude mcp add --scope user --transport http host-bridge http://host.docker.internal:8765/mcp --header "Authorization: Bearer ${TOKEN}"'
+        runuser -u agent -- env HOST_BRIDGE_TOKEN="$HOST_BRIDGE_TOKEN" bash -c 'claude mcp add --scope user --transport http host-bridge http://host.docker.internal:8765/mcp --header "Authorization: Bearer ${HOST_BRIDGE_TOKEN}"'
 caps:
   network:
     # Deps are baked into the image — no registry access needed at runtime.
@@ -42,7 +52,7 @@ caps:
       # a bare `host.docker.internal` entry is a silent no-op. Bare `localhost`
       # works but opens ALL host ports; scope per-port for least privilege.
       #
-      # exocortex-host-bridge (System/Agent/host-bridge): one host-native MCP server
+      # exocortex-host-bridge (host-bridge/ in this repo): one host-native MCP server
       # serving all host capabilities as plugins — gh + acli (the host's
       # authenticated CLIs), calendar (icalBuddy/EventKit), whisper (mlx_whisper).
       # Native macOS process, NOT a container: EventKit, Metal, and the host CLI

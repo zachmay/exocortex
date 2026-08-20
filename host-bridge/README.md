@@ -106,7 +106,7 @@ Health check: `curl http://localhost:8765/health`.
 - In the sandbox (where `npm install` is blocked): `npm run typecheck:sandbox` —
   uses `typescript`/`tsx` and the bridge's deps baked into the image, briefly
   symlinking `node_modules` → `/opt/vault-deps/node_modules` (tsc ignores
-  `NODE_PATH`). Requires those deps in `System/Agent/Sandbox/package.json` (+ an
+  `NODE_PATH`). Requires those deps in `sandbox/package.json` (+ an
   image rebuild).
 
 ## Tokens
@@ -118,22 +118,44 @@ npm run token -- --scopes read:gh,read:calendar    # mint a read-only subset (pr
 npm run token -- --scopes write:gh --ttl 3600      # 1-hour expiry (write implies read)
 ```
 
-`.bridge-token` (gitignored) is the **handoff file**: written by the CLI, read by
-the sandbox kit to authenticate. The server never reads it.
+`.bridge-token` (gitignored) is the **local copy** of the minted token, kept on
+the host. The server never reads it.
 
 ## Sandbox wiring
 
-The kit (`System/Agent/Sandbox/kit/spec.yaml`) registers one MCP server and
-allowlists one port:
+The token doesn't reach the sandbox via a mounted file — the sandbox never
+mounts this repo, only the vault. Instead, `run.sh` pushes the token into
+sbx's own secret store as a **custom secret** right after minting it:
+
+```bash
+sbx-<pinned-version> secret set-custom -g --host localhost --env HOST_BRIDGE_TOKEN \
+  --token "$(cat .bridge-token)"
+```
+
+This registers the real value keyed to the `localhost` host pattern (matching
+how `host.docker.internal:8765` traffic is already proxied/allowlisted as
+`localhost:8765` inside the sandbox — see the kit's network policy comments).
+Every sandbox then boots with `HOST_BRIDGE_TOKEN` seeded to a **placeholder**
+value, not the real token. The kit (`sandbox/kit/spec.yaml`) reads that
+placeholder into its MCP registration command:
 
 ```yaml
 - command: >-
-    runuser -u agent -- bash -c 'TOKEN=$(cat /vault/System/Agent/host-bridge/.bridge-token 2>/dev/null);
-    claude mcp add --scope user --transport http host-bridge
-    http://host.docker.internal:8765/mcp --header "Authorization: Bearer ${TOKEN}"'
+    runuser -u agent -- env HOST_BRIDGE_TOKEN="$HOST_BRIDGE_TOKEN" bash -c
+    'claude mcp add --scope user --transport http host-bridge
+    http://host.docker.internal:8765/mcp --header "Authorization: Bearer ${HOST_BRIDGE_TOKEN}"'
 # allowedDomains: localhost:8765
 ```
 
-Start the host bridge (so `.bridge-token` exists), then create/recreate the
-sandbox so the token is injected. An absent token registers fine but yields a
-clean 401 until then.
+sbx's egress proxy swaps the placeholder for the real token *in flight*, only
+on outbound requests that actually reach `localhost` — so the real token never
+lands in the sandbox filesystem, `~/.claude.json`, or process environment
+beyond the placeholder. This is a working instance of sbx's native
+credential-injection mechanism, not a workaround: see
+`sandbox/NOTES.md` ("Repo-flip left kit install commands pointing at deleted
+in-vault paths") for the fuller writeup and the rotation caveat.
+
+Run `run.sh` (which mints the token, then pushes it) before creating or
+recreating the sandbox. A missing/stale secret registration means the
+placeholder itself gets sent as the bearer token, which the host-bridge
+rejects with a clean 401.

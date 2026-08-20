@@ -67,6 +67,14 @@ RUN ln -sf "$(find /opt/playwright-browsers -name headless_shell -type f -execut
 # Lock the whole prefix read-only so the agent can't mutate baked deps.
 RUN chmod -R a-w /opt/vault-deps /opt/playwright-browsers
 
+# Kit-authored CLAUDE.md/settings.json/TOOLCHAIN.md — baked in at build time
+# rather than copied at sandbox-create time, since they're static per-image,
+# not per-sandbox-instance state. Placed late so editing them doesn't bust the
+# expensive layers above.
+RUN mkdir -p /home/agent/.claude
+COPY kit/files/home/claude/ /home/agent/.claude/
+RUN chown -R agent:agent /home/agent/.claude
+
 ENV PATH=/opt/vault-deps/venv/bin:/opt/vault-deps/node_modules/.bin:$PATH \
     NODE_PATH=/opt/vault-deps/node_modules \
     PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
