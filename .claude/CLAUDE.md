@@ -1,16 +1,17 @@
 # Host Environment
 
-You are running on the Mac host, outside any sandbox. This file is loaded
-because Claude was launched from `~/Projects/exocortex/` and complements
-the vault's `CLAUDE.md` with environment facts specific to running here.
+You are running on the Mac host, outside any sandbox. This file lives in
+this repo's `.claude/` directory and complements the vault's `CLAUDE.md`
+with environment facts specific to running here. Checkout location varies
+by machine — nothing below assumes a fixed absolute path.
 
 ## Paths
 
-| Location | Path |
+| Location | How to find it |
 |---|---|
-| Vault | `~/Documents/Exocortex` (also `vault/` symlink in this repo) |
-| Exocortex repo | `~/Projects/exocortex/` |
-| Host npm tools | `~/Projects/exocortex/node_modules/.bin/` |
+| Vault | the `vault/` symlink at this repo's root (resolves to wherever the Obsidian vault lives on this machine) |
+| This repo | wherever it's checked out — commands below assume you're running from its root |
+| Host npm tools | `node_modules/.bin/` at this repo's root |
 
 ## Tooling
 

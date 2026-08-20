@@ -1,14 +1,16 @@
 # Sandbox Toolchain Reference
 
 Full inventory of the dev tools baked into the sandbox image, and how to
-invoke each. Injected by the kit alongside `CLAUDE.md`. For the *rationale*
+invoke each. Baked into the image alongside `CLAUDE.md`. For the *rationale*
 behind each package (why it's in, what's deliberately skipped), see
-`/vault/System/Agent/Sandbox/packages.md`.
+`sandbox/packages.md` in the engine repo (checked out somewhere on the
+host — not reachable from inside here).
 
 The runtime is **network-locked**: `/opt/vault-deps` is read-only and package
-registries are denied, so `npm install` / `pip install` fail. To add a
-dependency, edit `System/Agent/Sandbox/package.json` (Node) or
-`requirements.txt` (Python) on the host and rebuild the image.
+registries are denied, so `npm install` / `pip install` fail from inside the
+sandbox. If a tool you need isn't here, ask the user — adding one means
+editing `sandbox/package.json`/`requirements.txt` and rebuilding the image on
+the host, none of which is possible from in here.
 
 ## Node / TypeScript
 
@@ -53,16 +55,3 @@ venv work only.
 - The Python tools also run as modules: `python3 -m ruff` / `-m mypy` / `-m pytest`.
 - Two PATH roots hold everything: `/opt/vault-deps/node_modules/.bin` (Node)
   and `/opt/vault-deps/venv/bin` (Python). Both are read-only.
-
-## Adding a tool (host-side rebuild cycle)
-
-1. Edit `System/Agent/Sandbox/package.json` and/or `requirements.txt`.
-2. Refresh lockfiles — Node: `npm install` in `System/Agent/Sandbox/`. Python:
-   regenerate `requirements.lock.txt` **inside the base image** (its Python is
-   3.13, not the host's), e.g. `docker run --rm --user root -v "$PWD":/req
-   docker/sandbox-templates:claude-code bash -c '… pip install -r
-   /req/requirements.txt && pip freeze > /req/requirements.lock.txt'`.
-3. `docker build -t exocortex-sbx:latest System/Agent/Sandbox`
-4. `docker save exocortex-sbx:latest -o /tmp/x.tar && sbx template load /tmp/x.tar`
-5. `sbx rm --force obsidian-Exocortex` + recreate (new image is picked up only
-   at create time).

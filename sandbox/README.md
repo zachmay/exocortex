@@ -24,81 +24,83 @@ See [[Docker SBX]] for background on `sbx` itself.
 | `requirements.txt` | Python deps — human-edited list with loose pins |
 | `requirements.lock.txt` | Pip-frozen lockfile (full transitive closure) — the file the Dockerfile actually installs |
 | `kit/spec.yaml` | sbx kit — names the agent (`obsidian`), references the image, sets `/vault` symlink and `/scratch`, declares network policy |
-| `kit/files/home/claude/` | Copied to `/home/agent/.claude/` at sandbox creation (sandbox-only `CLAUDE.md` overlay + `settings.json`). Source dir is dotless so Obsidian sync picks it up; an install step in `spec.yaml` does the `cp` + `chown`. |
+| `kit/files/home/claude/` | Baked into the image at `/home/agent/.claude/` by the `Dockerfile` (sandbox-only `CLAUDE.md` overlay, `settings.json`, `TOOLCHAIN.md`) — per-image state, not per-sandbox-instance, so it's a build-time `COPY` rather than a kit install-time step. |
 | `run.sh` | Launcher — runs `sbx run obsidian --kit ...` |
 | `README.md` | This file |
 | `packages.md` | Per-package rationale for what's included / skipped |
 
 Everything `docker build` needs is in this directory. Build context is
-`System/Agent/Sandbox/`.
+`sandbox/`.
 
 ## First-time setup on a fresh Mac
 
 Apple Silicon, macOS Sonoma (14) or later. Roughly 10 minutes end-to-end,
-most of which is the image build.
+most of which is the image build. This engine repo and the Obsidian vault are
+separate checkouts — the vault is not cloned into this repo, it's symlinked in.
+
+**sbx version note:** `sandbox/build.sh` and `sandbox/start.sh` are pinned to
+an explicit `sbx-<version>` binary rather than plain `sbx` — see `NOTES.md`
+for why. Check `NOTES.md` for the currently pinned version before assuming a
+newer release works.
 
 1. **Install Docker.** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
    or any Docker daemon. Verify: `docker --version`.
-2. **Install sbx.**
+2. **Install sbx**, both the floating cask (for `sbx login`/tooling) and the
+   pinned version the scripts actually use:
    ```console
    $ brew install docker/tap/sbx
+   $ brew install docker/tap/sbx@<version>   # see NOTES.md for the current pin
    $ sbx login                       # interactive — browser OAuth + network policy picker
    ```
-3. **Clone the vault** somewhere with read/write access. The vault path is
-   bind-mounted into the sandbox — pick a directory you trust.
-4. **Build the image** from the vault root:
+3. **Clone this repo**, then symlink the vault into it — `vault` is
+   gitignored, so this is a one-time local step per machine:
    ```console
-   $ docker build -t exocortex-sbx:latest System/Agent/Sandbox
+   $ ln -s /path/to/your/obsidian/vault vault
+   ```
+4. **Build + launch** — `npm run sandbox:build` (or `sandbox:start`, which
+   only rebuilds if inputs changed) drives the whole build → template-load →
+   sandbox-create cycle:
+   ```console
+   $ npm run sandbox:build
    ```
    Pulls the Claude Code base (~1 GB), installs apt deps, runs `npm ci`,
-   creates a Python venv from `requirements.lock.txt`, and downloads
-   Chromium via `playwright install`. Roughly 5–8 minutes on a clean cache.
-5. **Load the image into sbx** (sbx runs its own container runtime; host
-   Docker images aren't visible to it directly):
+   creates a Python venv from `requirements.lock.txt`, downloads Chromium via
+   `playwright install`, and bakes in the kit's `CLAUDE.md`/`settings.json`/
+   `TOOLCHAIN.md`. Roughly 5–8 minutes on a clean cache.
+5. **Validate the kit** any time (e.g. after an sbx upgrade):
    ```console
-   $ docker save exocortex-sbx:latest -o /tmp/exocortex-sbx.tar
-   $ sbx template load /tmp/exocortex-sbx.tar
-   $ rm /tmp/exocortex-sbx.tar
-   ```
-6. **Validate the kit:**
-   ```console
-   $ sbx kit validate System/Agent/Sandbox/kit
+   $ sbx kit validate sandbox/kit
    ```
    Expect `VALID:`.
-7. **Launch:**
-   ```console
-   $ ./System/Agent/Sandbox/run.sh
-   ```
 
 You should drop into a `claude` session inside the sandbox. Workspace is
-mounted at the host's path and symlinked to `/vault`. `/scratch` is empty
-and writable. Try `pwd` and `ls /vault` to confirm.
+mounted at the host's vault path and symlinked to `/vault`. `/scratch` is
+empty and writable. Try `pwd` and `ls /vault` to confirm.
 
 ### Only-needed-if-you're-editing-deps
 
 - **Node 20** on the host — only if you'll regenerate `package-lock.json`
-  after editing `package.json`. The vault's `.nvmrc` pins Node 20. `nvm use`
-  from the vault root picks it up.
+  after editing `package.json`. `.nvmrc` at this repo's root pins Node 20.
+  `nvm use` from the repo root picks it up.
 
 ## Launching
 
 ```console
-$ ./System/Agent/Sandbox/run.sh
+$ npm run sandbox:start
 ```
 
-The workspace is direct-mounted at the host's path (also symlinked to `/vault`
-inside the sandbox). Edits appear immediately in Obsidian — no branch /
-worktree indirection.
+The vault is direct-mounted at its host path (symlinked to `/vault` inside the
+sandbox). Edits appear immediately in Obsidian — no branch/worktree
+indirection.
 
 ### Passing args through to Claude
 
-`run.sh` ends with `"$@"` after the `--`, so any args you pass to the script
-are forwarded to the inner `claude` CLI inside the sandbox:
+Args after `--` are forwarded to the inner `claude` CLI inside the sandbox:
 
 ```console
-$ ./System/Agent/Sandbox/run.sh --continue          # resume last session
-$ ./System/Agent/Sandbox/run.sh --model opus        # pick a model
-$ ./System/Agent/Sandbox/run.sh -p "do the thing"   # one-shot prompt
+$ npm run sandbox:start -- --continue          # resume last session
+$ npm run sandbox:start -- --model opus        # pick a model
+$ npm run sandbox:start -- -p "do the thing"   # one-shot prompt
 ```
 
 Quoted args with spaces are preserved (`"$@"` quotes each arg individually —
@@ -118,26 +120,25 @@ The Dockerfile sets `PATH`, `NODE_PATH`, `PUPPETEER_EXECUTABLE_PATH`, and
 
 ### Adding a new npm package
 
-1. Edit `System/Agent/Sandbox/package.json`
-2. From `System/Agent/Sandbox/` on the host:
+1. Edit `sandbox/package.json`
+2. From `sandbox/` on the host:
    `PUPPETEER_SKIP_DOWNLOAD=true PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install`
    (the env vars prevent host-side browser downloads)
 3. Delete the local `node_modules/` that `npm install` created
-4. Rebuild + reload the image
-5. `sbx rm --force obsidian-Exocortex`
+4. `npm run sandbox:build` from the repo root (rebuilds + reloads + recreates)
 
 ### Adding a new Python package
 
-1. Edit `System/Agent/Sandbox/requirements.txt`
+1. Edit `sandbox/requirements.txt`
 2. Rebuild the image (will fail unless lockfile matches — see step 3)
 3. Regenerate the lockfile from the rebuilt venv:
    ```console
    $ docker run --rm exocortex-sbx:latest /opt/vault-deps/venv/bin/pip freeze | sort \
-       > System/Agent/Sandbox/requirements.lock.txt
+       > sandbox/requirements.lock.txt
    ```
    (Alternative: temporarily change the Dockerfile to install from
    `requirements.txt` for one build, freeze, then revert.)
-4. Rebuild + reload, `sbx rm --force`
+4. `npm run sandbox:build` from the repo root (rebuilds + reloads + recreates)
 
 `pip install <pkg>` and `npm install <pkg>` from *inside* the sandbox will
 fail — the npm registry is denied in the kit, and `/opt/vault-deps` is

@@ -28,7 +28,7 @@ doesn't have to re-derive the reasoning.
 ## Python
 
 Installed via pip into `/opt/vault-deps/venv`. Add to
-`System/Agent/Sandbox/requirements.txt`; the Dockerfile builds the venv
+`sandbox/requirements.txt`; the Dockerfile builds the venv
 and chmods it read-only.
 
 ### Included
@@ -148,8 +148,8 @@ def write(path: Path, metadata: dict, body: str) -> None:
 
 ## npm
 
-Add to `System/Agent/Sandbox/package.json` then `npm install` from
-`System/Agent/Sandbox/` on the host to update `package-lock.json`.
+Add to `sandbox/package.json` then `npm install` from
+`sandbox/` on the host to update `package-lock.json`.
 Rebuild the image to pick up the changes.
 
 ### Included
@@ -170,7 +170,7 @@ Rebuild the image to pick up the changes.
 | `fast-glob` | Vault-wide file matching, faster than `node:fs` walks |
 | `mathjs` | Symbolic math in JS |
 | `typescript` + `tsx` | Run and typecheck the host-bridge (and any vault TS) in-sandbox. `tsc`/`tsx` land on PATH via `/opt/vault-deps/node_modules/.bin`. The bridge typechecks with `npm run typecheck:sandbox` (briefly symlinks `node_modules` → the baked deps, since tsc ignores `NODE_PATH`). |
-| `@modelcontextprotocol/sdk` + `express` + `zod` | The host-bridge's own runtime deps — baked so its TS resolves for the in-sandbox typecheck. Versions tracked to `System/Agent/host-bridge/package.json` |
+| `@modelcontextprotocol/sdk` + `express` + `zod` | The host-bridge's own runtime deps — baked so its TS resolves for the in-sandbox typecheck. Versions tracked to `host-bridge/package.json` |
 | `@types/node` + `@types/express` | Type defs the host-bridge typecheck needs |
 | `@biomejs/biome` | Fast lint **+** format for JS/TS in one binary | Primary linter/formatter; `npm run lint` / `format` / `check` |
 | `eslint` + `typescript-eslint` | Configurable TS linting | For projects with existing ESLint flat configs; complements Biome |
@@ -203,7 +203,7 @@ REPL — an agent reads stdout, so IPython etc. earn nothing):
 
 ## Implementation order
 
-1. Add `requirements.txt` next to `package.json` in `System/Agent/Sandbox/`
+1. Add `requirements.txt` next to `package.json` in `sandbox/`
 2. Extend Dockerfile to install Python deps into `/opt/vault-deps/venv` and
    add the venv's `bin/` to `PATH`
 3. Update `package.json` with the npm additions; run `npm install` on the

@@ -26,8 +26,10 @@ git, gh, ripgrep, curl.
 
 The runtime is network-locked: `npm install` / `pip install` fail
 (`/opt/vault-deps` is read-only, registries denied). To add a dependency,
-ask the user to edit `sandbox/package.json` or `requirements.txt` in
-`~/Projects/exocortex/` on the host and run `npm run sandbox:build`.
+ask the user to edit `sandbox/package.json` or `requirements.txt` in the
+engine repo (the one containing this sandbox setup, checked out somewhere
+on the host — not reachable from inside here) and run `npm run
+sandbox:build`.
 
 **Full inventory + how to invoke each tool: see `~/.claude/TOOLCHAIN.md`.**
 
