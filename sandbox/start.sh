@@ -24,6 +24,10 @@ set -euo pipefail
 # Run from the repo root regardless of where this script is invoked from.
 cd "$(dirname "$0")/.."
 
+# Pinned to a specific sbx version rather than floating `sbx` — see NOTES.md
+# for why. Test with `brew install docker/tap/sbx@<version>` before bumping.
+SBX="sbx-0.39.0"
+
 IMAGE="exocortex-sbx:latest"
 AGENT="obsidian"
 KIT="sandbox/kit"
@@ -74,9 +78,9 @@ if [[ "${SBX_ATTACH_ONLY:-0}" != "1" ]]; then
   need_build=0; need_recreate=0
   [[ "$img_hash" != "$prev_img" ]] && need_build=1
   [[ "${SBX_FORCE_BUILD:-0}" == "1" ]] && need_build=1
-  sbx template ls 2>/dev/null | grep -q "exocortex-sbx" || need_build=1
+  "$SBX" template ls 2>/dev/null | grep -q "exocortex-sbx" || need_build=1
   [[ "$kit_hash" != "$prev_kit" ]] && need_recreate=1
-  sbx ls 2>/dev/null | grep -qw "$SANDBOX" || need_recreate=1
+  "$SBX" ls 2>/dev/null | grep -qw "$SANDBOX" || need_recreate=1
   [[ "$need_build" -eq 1 ]] && need_recreate=1
 
   if [[ "$need_build" -eq 1 ]]; then
@@ -87,18 +91,18 @@ if [[ "${SBX_ATTACH_ONLY:-0}" != "1" ]]; then
     trap 'rm -f "$TAR"' EXIT
     echo "==> Loading image into the sbx runtime"
     docker save "$IMAGE" -o "$TAR"
-    sbx template load "$TAR"
+    "$SBX" template load "$TAR"
     echo "$img_hash" > "$STATE_DIR/image.hash"
   fi
 
   if [[ "$need_recreate" -eq 1 ]]; then
     echo "==> Recreating sandbox '$SANDBOX' (reads the kit fresh)"
-    sbx rm --force "$SANDBOX" 2>/dev/null || true
-    sbx create "$AGENT" "$VAULT" --kit "$KIT" --name "$SANDBOX"
+    "$SBX" rm --force "$SANDBOX" 2>/dev/null || true
+    "$SBX" create "$AGENT" "$VAULT" --kit "$KIT" --name "$SANDBOX"
     echo "$kit_hash" > "$STATE_DIR/kit.hash"
   fi
 
   [[ "$need_build" -eq 0 && "$need_recreate" -eq 0 ]] && echo "==> Up to date — attaching"
 fi
 
-exec sbx run --kit "$KIT" "$SANDBOX" ${1+-- "$@"}
+exec "$SBX" run --kit "$KIT" "$SANDBOX" ${1+-- "$@"}

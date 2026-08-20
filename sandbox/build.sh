@@ -15,6 +15,10 @@ set -euo pipefail
 # Run from the repo root regardless of where this script is invoked from.
 cd "$(dirname "$0")/.."
 
+# Pinned to a specific sbx version rather than floating `sbx` — see NOTES.md
+# for why. Test with `brew install docker/tap/sbx@<version>` before bumping.
+SBX="sbx-0.39.0"
+
 IMAGE="exocortex-sbx:latest"
 AGENT="obsidian"
 KIT="sandbox/kit"
@@ -29,11 +33,11 @@ TAR="/tmp/exocortex-sbx-build.tar"
 trap 'rm -f "$TAR"' EXIT
 echo "==> Loading image into the sbx runtime"
 docker save "$IMAGE" -o "$TAR"
-sbx template load "$TAR"
+"$SBX" template load "$TAR"
 
 echo "==> Recreating sandbox '$SANDBOX'"
-sbx rm --force "$SANDBOX" 2>/dev/null || true
-sbx create "$AGENT" "$VAULT" --kit "$KIT" --name "$SANDBOX"
+"$SBX" rm --force "$SANDBOX" 2>/dev/null || true
+"$SBX" create "$AGENT" "$VAULT" --kit "$KIT" --name "$SANDBOX"
 
 # Update hashes so sandbox:start knows the image is current.
 mkdir -p "$STATE_DIR"
